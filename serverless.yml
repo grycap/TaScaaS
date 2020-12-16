@@ -1,0 +1,190 @@
+
+custom:
+  stage: ${opt:stage, 'test'}
+  app_acronym: ${opt:name, 'htc-SLA'}
+  region: ${opt:region, 'us-east-1'}
+  stack_name: '${self:custom.app_acronym}-${self:custom.stage}'
+  dynamodb_table: ${self:custom.stack_name}
+  s3_bucket: ${self:custom.stack_name}
+  lambda_role: ${opt:lambda_role}
+  init_workers: ${opt:init_workers, 1}
+  max_workers: ${opt:max_workers, 10}
+  dynamo_read: ${opt:dynamo_read, 1}
+  dynamo_write: ${opt:dynamo_write, 1}
+  scaletime: ${opt:scaletime, 300}
+  secret: ${opt:secret}
+
+service: ${self:custom.app_acronym}
+
+provider:
+  name: aws
+  runtime: python3.8
+  stage: ${self:custom.stage}
+  region: ${self:custom.region}
+  memorySize: 512
+  role: ${self:custom.lambda_role}
+
+  environment:
+    BUCKETIN: ${self:custom.s3_bucket}
+    BUCKETOUT: ${self:custom.s3_bucket}
+    PREFIXIN: input
+    PREFIXOUT: output/worker-input
+    DYNAMOTABLE: ${self:custom.dynamodb_table}
+    INITWORKERS: ${self:custom.init_workers}
+    MAXWORKERS: ${self:custom.max_workers}
+    PREFIXRESULTS: output/results
+    SCALETIME: ${self:custom.scaletime}
+    SECRET: ${self:custom.secret}
+
+functions:
+  config:
+    name: ${self:custom.stack_name}-configuration
+    description: Handles tasks initialization when a configuration file is created in the bucket
+    handler: lambda/configuration.lambda_handler
+    timeout: 30
+    disableLogs: true
+    role: ${self:custom.lambda_role}
+    events:
+      - s3:
+          bucket: ${self:custom.s3_bucket}
+          event: s3:ObjectCreated:*
+          rules:
+            - prefix: input/
+            - suffix: .config
+
+  data:
+    name: ${self:custom.stack_name}-data
+    description: Handles results files
+    handler: lambda/data.lambda_handler
+    timeout: 30
+    disableLogs: true
+    role: ${self:custom.lambda_role}
+    events:
+      - http:
+          path: results/upload/{jobID}/{worker}
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:
+              jobID: true
+              worker: true
+             querystrings:
+              wID: true    
+
+  LB:
+    name: ${self:custom.stack_name}-LB
+    description: Perform load balance
+    handler: lambda/LB.lambda_handler
+    timeout: 30
+    package:
+     include:
+      - bin/stdinServer
+    disableLogs: true
+    role: ${self:custom.lambda_role}
+    events:
+      - http:
+          path: lb/{id}/report
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:
+              id: true
+             querystrings:
+              worker: true
+              nIter: true
+              dt: true
+        
+      - http:
+          path: lb/{id}/finish
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:
+              id: true
+             querystrings:
+               worker: true
+               nIter: true
+               dt: true
+
+      - http:
+          path: lb/{id}/start
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:
+              id: true
+             querystrings:
+               worker: true
+               dt: true
+
+  dispatcher:
+    name: ${self:custom.stack_name}-dispatcher
+    description: Handle job requests
+    handler: lambda/dispatcher.lambda_handler
+    timeout: 30
+    reservedConcurrency: 1
+    disableLogs: true
+    role: ${self:custom.lambda_role}
+    events:
+      - http:
+          path: node/register
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             querystrings:
+              slots: true
+              maxSlots: true
+      - http:
+          path: node/{id}/disconnect
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:
+              id: true
+      - http:
+          path: node/{id}/jobs
+          method: get  
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:    
+              id: true
+             querystrings: 
+              slots: true
+      - http:
+          path: node/{id}/update
+          method: get
+          integration: lambda-proxy
+          request:
+            parameters:
+             paths:   
+              id: true
+             querystrings:
+              slots: false
+              maxSlots: false
+
+resources:
+ Resources:      
+  jobsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ${self:custom.dynamodb_table}
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: worker
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+        - AttributeName: worker
+          KeyType: RANGE
+      ProvisionedThroughput:
+        ReadCapacityUnits: ${self:custom.dynamo_read}
+        WriteCapacityUnits: ${self:custom.dynamo_write}
