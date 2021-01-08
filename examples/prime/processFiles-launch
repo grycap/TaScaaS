@@ -1,0 +1,107 @@
+#!/bin/bash
+
+inputFilesURL=$1
+url=$2
+ID=$3
+iworker=$4
+reportTime=$5
+uploadRequest=$6
+
+#Create process folder
+rm -r prime-$ID-$iworker &> /dev/null
+mkdir prime-$ID-$iworker
+
+if [[ "$?" != 0 ]]; then
+    echo "Unable to create calculation folder" >> $ID-$iworker.log
+    exit 1
+fi
+
+outputDir=prime-$ID-$iworker
+cd $outputDir
+
+cp ../processFile .
+
+#Log
+echo "Input data files: $inputFilesURL" >> log
+echo "Execution ID: $ID" >> log
+echo "LB server URL: $url" >> log
+echo "Worker id: $iworker" >> log
+
+#Download files
+echo "Download input files from:" >> log
+echo "$inputFilesURL" >> log
+wget -q -O files.tar "${inputFilesURL}" >> log
+
+#Extract input files
+echo "Extracting input files" >> log
+tar -xf files.tar 2>> log
+rm files.tar
+
+echo "Input data extracted" >> log
+
+#Send a start request to get the number of iterations
+sent=0
+while [ $sent -le 5 ]
+do
+    response="$(curl -s $url/start?worker=${iworker}\&dt=0)"
+    if echo -e "$response" | grep "Assigned:"; then
+        nIter=`echo -e "$response" | grep "Assigned:" | cut -d ":" -f2`
+        echo "Start petition ${sent} succed"
+        break
+    else
+        echo "Start petition number $sent failed"
+        sent=$(( sent + 1 ))
+    fi
+done
+
+if [ ${sent} -gt 5 ]
+then
+    echo "Unable to receive iteration assign"
+    exit 1
+else
+    echo "Number of iterations to do: ${nIter}"
+fi
+
+#Get number of files
+nFiles=`ls file_* | wc -l`
+
+#Calculate number of workers
+nWorkers=$(( nFiles / nIter ))
+
+#Calculate residual files
+nResFiles=$(( nFiles - nIter*nWorkers ))
+
+#Calculate starting file
+firstFile=0
+if [ $iworker -gt 0 ]
+then
+    firstFile=$(( nResFiles + nIter*iworker))
+fi
+
+#Start file processing
+mkdir results
+
+start=$SECONDS
+for (( i = 0 ; i < $nIter ; i++ ))
+do
+    nextFile=$(( firstFile + i ))
+    ./processFile file_$nextFile
+    mv file_${nextFile}_factors results/
+done
+end=$SECONDS
+duration=$(( end - start ))
+#Send finish request
+curl $url/finish?nIter=${nIter}\&worker=${iworker}\&dt=${duration}
+
+#Wrap result files
+tar -cJf results.tar.xz results
+
+#Request upload url
+uploadurl=`curl $uploadRequest`
+
+#Upload results
+curl -s -X PUT -T "results.tar.xz" "$uploadurl"
+
+cd ..
+#Remove local files
+rm -r prime-$ID-$iworker &> /dev/null

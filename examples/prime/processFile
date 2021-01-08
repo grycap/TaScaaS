@@ -1,0 +1,12 @@
+#!/bin/bash
+
+filename=$1
+
+sort -g $filename &> ${filename}_sorted
+
+cat ${filename}_sorted | factor &> ${filename}_factors
+
+nprime=`awk '{print NF}' ${filename}_factors | grep -cw "2"`
+
+echo " " >> ${filename}_factors
+echo "Number of prime numbers: $nprime" >> ${filename}_factors

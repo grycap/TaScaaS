@@ -1,0 +1,53 @@
+#!/bin/bash
+
+inputFilesURL=$1
+url=$2
+ID=$3
+iworker=$4
+reportTime=$5
+uploadRequest=$6
+
+#Create simulation folder
+rm -r sim-$ID-$iworker &> /dev/null
+mkdir sim-$ID-$iworker
+
+if [[ "$?" != 0 ]]; then
+    echo "Unable to create simulation folder" >> $ID-$iworker.log
+    exit 1
+fi
+
+outputDir=sim-$ID-$iworker
+cd $outputDir
+
+#Log
+echo "Input data files: $inputFilesURL" >> log
+echo "Execution ID: $ID" >> log
+echo "LB server URL: $url" >> log
+echo "Worker id: $iworker" >> log
+echo "reportTime: $reportTime" >> log
+
+#Download files
+echo "Download input file from:" >> log
+echo "$inputFilesURL" >> log
+wget -q -O data "${inputFilesURL}" >> log
+
+echo "Input data extracted" >> log
+
+#Start simulation
+echo "Starting simulation"
+cp ../pi .
+./pi $iworker $url 10000000 $reportTime &> simulation.log
+
+echo "Simulation done" >> log
+
+tar -cJf results-$ID.tar.xz *
+
+#Request upload url
+uploadurl=`curl $uploadRequest`
+
+#Upload results
+curl -s -X PUT -T "results-$ID.tar.xz" "$uploadurl"
+
+cd ..
+#Remove local files
+rm -r sim-$ID-$iworker &> /dev/null
