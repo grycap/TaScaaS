@@ -1,0 +1,143 @@
+openapi: "3.0.1"
+info:
+  title: ""
+  version: "2020-12-22T11:02:03Z"
+servers:
+- url: "https://**********.execute-api.*********.amazonaws.com/{basePath}"
+  variables:
+    basePath:
+      default: "/test"
+paths:
+  /node/{id}/jobs:
+    get:
+      parameters:
+      - name: "slots"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "id"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+  /lb/{id}/start:
+    get:
+      parameters:
+      - name: "worker"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "dt"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "id"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+  /lb/{id}/report:
+    get:
+      parameters:
+      - name: "nIter"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "worker"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "dt"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "id"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+  /node/{id}/disconnect:
+    get:
+      parameters:
+      - name: "id"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+  /node/{id}/update:
+    get:
+      parameters:
+      - name: "maxSlots"
+        in: "query"
+        schema:
+          type: "string"
+      - name: "slots"
+        in: "query"
+        schema:
+          type: "string"
+      - name: "id"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+  /node/register:
+    get:
+      parameters:
+      - name: "maxSlots"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "slots"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+  /results/upload/{jobID}/{worker}:
+    get:
+      parameters:
+      - name: "wID"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "worker"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+      - name: "jobID"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+  /lb/{id}/finish:
+    get:
+      parameters:
+      - name: "nIter"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "worker"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "dt"
+        in: "query"
+        required: true
+        schema:
+          type: "string"
+      - name: "id"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+components: {}
