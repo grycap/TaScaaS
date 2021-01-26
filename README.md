@@ -1,7 +1,13 @@
 
 # TaScaaS
  
- Task Scheduler As A Service (TaScaaS) provides a complete serverless service to schedule and distribute High Throughput Computing (HTC) jobs among your computational infrastructures. Also, TaSCaaS assists your infrastructures to scale according to the workload and provides an integrated load balance system for the jobs. To balance the jobs, by default, TaScaas uses [RUPER-LB](https://github.com/PenRed/RUPER-LB). Although the balance system could be changed by another one with the same API, which is explained in section **Load balance API**, we encourage to use RUPER-LB as the load balance system, since the package includes a complete client which can be easily integrated in the user application. Furthermore, this client handles the possible errors returned by the server. Thus, the load balancer can be used transparently.
+ Task Scheduler As A Service (TaScaaS) provides a complete serverless service to schedule and distribute High Throughput Computing (HTC) jobs among your computational infrastructures. 
+ 
+ ![TaScaaS diagram](img/TaScaaS.png)
+
+TaScaaS create and handles jobs to be executed among all the available worker infrastructures, which are constituted by several workers capable to execute our jobs. For example, a worker infrastructure could be a cluster handled by Slurm, a scalable infrastructure deployed on EC2, etc. The jobs are created by TaScaaS according to the configuration files uploaded by the user to S3, as we will explain in the following sections. Then, each job is split in partitions that can run independently. Finally, these partitions will be distributed among the available workers in the worker infrastructures. To distribute the partitions, the frontend request to the TaScaaS infrastructure as many job partitions as their workers can process concurrently. Then, it assign each partition to the local workers. On the other hand, the workers communicate with the TaScaaS infrastructure to report their progress on the job partition computation.
+
+Also, TaSCaaS assists your worker infrastructures to scale according to the workload and provides an integrated load balance system for the jobs. The scale process of the worker infrastructures is supposed to be done updating the number of available workers. On the other hand, to balance the jobs, by default, TaScaas uses [RUPER-LB](https://github.com/PenRed/RUPER-LB). The balance procedure consists on distribute the total workload of each job among all the job partitions running on different workers, according to the worker performance capabilities. Although the balance system could be changed by another one with the same API, which is explained in section **Load balance API**, we encourage to use RUPER-LB as the load balance system, since the package includes a complete client which can be easily integrated in the user application. Furthermore, this client handles the possible errors returned by the server. Thus, the load balancer can be used transparently.
  
  
 # Installation
@@ -13,8 +19,8 @@
 
  The optional configuration parameters are listed below:
  
- * **stage**: The stage of the deployed infrastructure. It is used to construct the name of the TaScaaS elements, such as [Amazon S3](https://aws.amazon.com/s3) buckets or [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) tables. The default value is *test*.
- * **app_acronym**: A name for your application. Like **stage**, it is used to assign a name to TaScaaS elements. The default value is *htc-SLA*.
+ * **stage**: The stage of the deployed infrastructure, such as *beta*, *test*, *prod*. Combined with **app_acronym**, is used to construct the name of the TaScaaS elements, such as [Amazon S3](https://aws.amazon.com/s3) buckets or [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) tables. The default value is *test*.
+ * **app_acronym**: A name for your application. Combined with **stage**, it is used to assign a name to TaScaaS elements. The default value is *htc-SLA*.
  * **region**: The [AWS region](https://aws.amazon.com/about-aws/global-infrastructure/regions_az/?nc1=h_ls) where the TaScaaS infrastructure will be deployed. The default value is *us-east-1*.
  * **init_workers**: Default initial workers for each submitted job. One worker is set as default.
  * **max_workers**: Maximum number of workers to be used for each submitted job. By default this value is set to 10.
@@ -44,6 +50,8 @@
  This two steps are repeated to adapt the number of active slots to the incoming workload. Notice that TaScaaS does not use any knowledge about the duration of the jobs executions, as they could depend strongly on the input data or other specific configuration parameters.
  
 # API
+ 
+ This section describes the API used to comunicate with the [Amazon API Gateway](https://aws.amazon.com/api-gateway). However, an OpenAPI v3 description file is provided in the file *api/api-gateway.yaml*.
  
  To allow external workers to communicate with TaScaaS, an [Amazon API Gateway](https://aws.amazon.com/api-gateway) is created with the following set of endpoints:
  
@@ -75,19 +83,19 @@
  
 ## /node/{id}/update
  
- This request updates the information of the worker infrastructure specified by the uuid (path parameter **id**). The functionality of this request is twofold. First, because the TasCaaS infrastructure registers the timestamp of the last update request done by each worker infrastructure. With this information, TasCaas considers as disconnected any worker infrastructure whose elapsed time, since the latest update, is greater than a threshold. Hence, during the scale step will be ignored. Moreover, if the elapsed time reaches a second threshold, the worker infrastructure will be removed from the database. Notice that is required an *update* request, *jobs* requests does not update the timestamp.
+ This request updates the information of the worker infrastructure specified by the UUID (path parameter **id**). The functionality of this request is twofold. First, because the TasCaaS infrastructure registers the timestamp of the last update request done by each worker infrastructure. With this information, TasCaas considers as disconnected any worker infrastructure whose elapsed time, since the latest update, is greater than a threshold. Hence, during the scale step will be ignored. Moreover, if the elapsed time reaches a second threshold, the worker infrastructure will be removed from the database. Notice that is required an *update* API request, other requests does not update the timestamp.
  
  On the other hand, if the request contains query string parameters, it can be used to update the infrastructure working information. If the parameter **slots** is specified, the number of active slots is updated accordingly. This should be used when the requested capacity changes and the worker infrastructure scales to fit it. Also, it is possible to specify a **maxSlots** parameter to modify the number of maximum slots of the worker infrastructure.
  
 ## /node/{id}/disconnect
  
- Specifying the worker infrastructure uuid (path parameter **id**), removes it from the TaScaaS database. As a consequence, this identifier is cancelled and can't be used to request more jobs or updates. Also, the corresponding slots are not considered for future scaling steps.
+ Specifying the worker infrastructure UUID (path parameter **id**), removes it from the TaScaaS database. As a consequence, this identifier is cancelled and can't be used to request more jobs or updates. Also, the corresponding slots are not considered for future scaling steps.
  
 ## /node/{id}/jobs
  
- This endpoint requires an infrastructure uuid, provided by the */node/register* endpoint, and handles the jobs requests. In addition, the parameter **slots** must be provided as a query string parameter. This one indicates how many jobs the asking infrastructure can execute at this moment.
+ This endpoint requires an infrastructure UUID, provided by the */node/register* endpoint, and handles the jobs requests. In addition, the parameter **slots** must be provided as a query string parameter. This one indicates how many jobs the worker infrastructure can execute at this moment.
  
- As response, this endpoint returns a json with two fields, **requiredCap** and **configs**. The first one, specify the calculated required capacity to handle the incoming job workload. This is specified as percentage. For example, if a worker infrastructure has been registered with 1 initial active **slot** and 4 **maxSlots**, and TaScaaS requires a capacity of 50%, the infrastructure should scale to 2 active slots. On the other hand, the parameter **configs** is an array with the configurations of the dispatched jobs. The structure of each individual configuration is as follows,
+ As response, this endpoint returns a JSON with two fields, **requiredCap** and **configs**. The first one, specify the calculated required capacity to handle the incoming job workload. This is specified as percentage. For example, if a worker infrastructure has been registered with 1 initial active **slot** and 4 **maxSlots**, and TaScaaS requires a capacity of 50%, the infrastructure should scale to 2 active slots. On the other hand, the parameter **configs** is an array with the configurations of the dispatched jobs. The structure of each individual configuration is as follows,
  
  * **ID**: Job identifier uuid.
  * **reportTime**: Expected report time, calculated according to the expected total execution time. If the report time is negative, no report is required for this job. This reports are used to balance the workload among all workers executing the same job. Also, could be used to deploy more workers if the expected execution time can't be achieved by the current workers.
@@ -142,7 +150,7 @@ The paths parameters specify the job identifier (**jobID**) and the worker numbe
  
  where *presignedUrl* is the received url.
  
-# Infrastructure 
+# Architecture 
 
  The TasCaaS infrastructure is summarised in the following diagram:
  
@@ -161,7 +169,7 @@ In the next subsections, a brief description of the purpose of the different com
  ${app_acronym}-${stage}
  ```
  
- Inside the prefix */input* of the same bucket, the user must upload also the input data to be delivered to the workers, for example, as a tarball. The triggering files (*.config* files) must use the json format with the following structure,
+ Inside the prefix */input* of the same bucket, the user must upload also the input data to be delivered to the workers, for example, as a tarball. The triggering files (*.config* files) must use the JSON format with the following structure,
  
  ```
  {
@@ -178,17 +186,17 @@ In the next subsections, a brief description of the purpose of the different com
  ${app_acronym}-${stage}/input/data.tar
  ```
 
- the value of **inputFile** should be *"data.tar"*. Notice that, although the first parameter is called **iterations**, the platform can be used for non iterative applications. For example, for processing files, where each iteration corresponds to a single file included or accessible via the input data. In the *Examples* section we will illustrate this usage with examples. If our application does not tolerate iteration reasignation, the value of **time** can be set to a negative value to disable load balancing on this job. Otherwise, this value will be used to calculate the time between load balance reports and, depending on the execution speed of the initial workers, if the execution require, and how many, new workers must be deployed to finish the execution within the specified time.
+ the value of **inputFile** should be *"data.tar"*. Notice that, although the first parameter is called **iterations**, the platform can be used for non iterative applications. For example, for processing files, where each iteration corresponds to a single file included or accessible via the input data. In the *Examples* section we will illustrate this usage with examples. If our application does not tolerate iteration reasignation, the value of **time** can be set to a negative value to disable load balancing on this job. Otherwise, this value will be used to calculate the time between load balance reports. In addition, if the job partitions are not expected to finish in the specified time, TaScaaS will create more job partitions to try to finish the execution witihin time.
 
 ## Dispatcher
- The Dispatcher function handles the life cycle of the worker infrastructures, including registration, disconnection an job petitions. However, it does not track the job once it has been sent to be processed. The job tracking will be done by the LB function. In addition, the dispatcher function performs the evaluation of the system workload and the calculation s of the required capacity described at section **Scale hint**.
+ The Dispatcher function handles the life cycle of the worker infrastructures, including registration, disconnection an job requests. However, it does not track the job once it has been sent to be processed. The job tracking will be done by the LB function. In addition, the dispatcher function performs the evaluation of the system workload and the calculation s of the required capacity described at section **Scale hint**.
 
 ## LB
- The purpose of the load balance function is to track the job progress. Each job has one or more working nodes executing a part of the whole task. When a worker starts to process one of these parts, a start petition is sent to the API, which is received by the LB function to flag this part as started. Analogously, when a worker finishes its job part, a finish petition is received by the LB function to flag the part as finished. However, during the execution, the procedure is divided in two types depending on whether load balance is enabled. For balanced jobs, LB function expects to receive regular *report* (see section **API** subsection **/lb/{id}/report**) petitions to reassign the iterations of each job partition according to the computation speed of each worker. In addition, LB function will create new partitions if the predicted execution time exceed the configuration parameter **time**. On the other hand, for non balanced jobs, the LB function does not expect to receive any report. Hence, no iteration reassignation is calculated and no new partitions are created.
+ The purpose of the load balance function is to track the job progress. Each job has one or more working nodes executing a part of the whole task. When a worker starts to process one of these parts, a start petition is sent to the API, which is received by the LB function to flag this part as started. Analogously, when a worker finishes its job part, a finish petition is received by the LB function to flag the part as finished. However, during the execution, the procedure is divided in two types depending on whether load balance is enabled. For balanced jobs, LB function expects to receive regular *report* (see section **API** subsection **/lb/{id}/report**) requests to reassign the iterations of each job partition according to the computation speed of each worker. In addition, LB function will create new partitions if the predicted execution time exceed the configuration parameter **time**. On the other hand, for non balanced jobs, the LB function does not expect to receive any report. Hence, no iteration reassignation is calculated and no new partitions are created.
 
 ## Data
 
-Data function receive only the *upload* petitions. As response, they include a presigned URL to upload the data to the TaScaaS S3 bucket, in the *output/results* folder.
+Data function receive only the *upload* requests. As response, they include a presigned URL to upload the data to the TaScaaS S3 bucket, in the *output/results* folder.
 
 ## DynamoDB table
 
@@ -213,7 +221,7 @@ This package provide two different examples. The first one, located at *examples
 
 In the second example, each worker performs a fixed number of iterations, i.e. the process is not balanced. Therefore, each iteration consists on a single file to be processed. Each file contains a single column with numbers that must be factorised to determine the number of prime numbers. 
 
-Following, it will be explained how to prepare and run both examples. The only assumption is that the TaScaaS infrastructure has been previously deployed. To handle the comunication with the API gateway, the examples use the provided *worker.py* script. This registers our worker infrastructure and handles the comunication with TaScaaS. By default, it asumes that the scaling process is trivial, i.e. consists on reserve more or less of the available slots. This approach could be used by worker infrastructures consisting on a single node, where, for example, each slot correspond to a single core of the processor. However, if our worker infrastructure consists on several working nodes, the *scale* function should be reimplemented to fit our infrastructure needs. The default *scale* function is shown below,
+Following, it will be explained how to prepare and run both examples. The only assumption is that the TaScaaS infrastructure has been previously deployed. To handle the comunication with the API gateway, the examples use the provided *worker.py* script. This registers our worker infrastructure and handles the comunication with TaScaaS. By default, it asumes that the scaling process is trivial, i.e. the reserved slots are ready to use inmideatly. This approach could be used by worker infrastructures consisting on a single node, where, for example, each slot correspond to a single core of the processor. However, if our worker infrastructure consists on several working nodes, the *scale* function should be reimplemented to fit our infrastructure needs. The default *scale* function is shown below,
 
 ```python
 def scale(reqCap,s,maxS):
@@ -223,7 +231,7 @@ def scale(reqCap,s,maxS):
 
 where **reqCap** is the required capacity percentage received from TaScaaS, **s** is the actual number of slots and **maxS** is the maximum number of slots to be allocated. As result, the function returns the new number of available slots.
 
-Once our scale function has been implemented, the worker daemon can be started using the command
+Once our scale function has been implemented, the worker daemon can be started in the worker infrastructure frontend using the command
 
 ```
 python3 worker.py api-url slots max-slots sleep-time worker-executable secret
