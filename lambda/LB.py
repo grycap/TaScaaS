@@ -1,19 +1,3 @@
-# IM - Infrastructure Manager
-# Copyright (C) 2020-2021 - GRyCAP - Universitat Politecnica de Valencia
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 import json
 import os
 import stat
@@ -90,9 +74,12 @@ def createWorkers(ID, nworkers, newWorkers, table, reportTime, ndone):
         return
     #Create new workers
     MAXWORKERS = int(os.environ['MAXWORKERS'])
+    TIMEOUT = int(os.environ['TIMEOUT'])
     maxNewWorkers = max(MAXWORKERS-nworkers,0)
     newWorkers = min(newWorkers,maxNewWorkers)
     if newWorkers > 0:
+        #Calculate ttl
+        ttl = TIMEOUT + int(tsleep.time())
         print("Create %d new workers" % newWorkers)
         try:
             for i in list(range(newWorkers)):
@@ -106,7 +93,8 @@ def createWorkers(ID, nworkers, newWorkers, table, reportTime, ndone):
                         'assigned': int(ndone),
                         'finished': int(0),
                         'done': int(0),
-                        'measures': []
+                        'measures': [],
+                        'ttl': int(ttl)
                     }
                 )
                 
@@ -462,7 +450,7 @@ def lambda_handler(event, context):
         if "Item" not in response:
             return {
                 'statusCode': 400,
-                'body': "Dynamo table/item doens't exist"
+                'body': "Dynamo table/item doesn't exist"
             }
         globItem = response["Item"]
         #Check if init time has been set
@@ -526,8 +514,8 @@ def lambda_handler(event, context):
         return start(p,ID,iw,event,telaps,workers[iw]["tinit"])
     elif path.endswith("/report"):
         #Is a report
-        #Check if last worker has sent at least, three reports
-        if len(workers[nworkers-1]['measures']) > 4:
+        #Check if last worker has sent at least, two reports
+        if len(workers[nworkers-1]['measures']) > 2:
             #Then, we can add new workers 
             targetETA = int(globItem['dt'])      #Get target execution time
             targetETA = max(targetETA-telaps,0)           #Calculate residual desired execution time
@@ -545,7 +533,9 @@ def lambda_handler(event, context):
         keyReport = str(os.environ['PREFIXRESULTS']) + "/" + ID + "/worker-" + str(iw) + "/balance.rep"
         worker = workers[iw]
         tinit = worker['tinit']
-        data = "# %d %d %d \n" % (worker['worker'], worker['done'], tinit)
+        data =  "# %s\n" % (ID)
+        data += "# %6s  %11s  %11s  %11s %11s\n" % ("worker","done","worker-init","job-init","finish")
+        data += "#    %03d  %11d  %11d  %11d  %11d\n" % (int(worker['worker']), int(event["queryStringParameters"]["nIter"]), int(tinit), int(globItem['tinit']), int(telaps))
             
         for measure in worker['measures']:
             data += " %d %E \n" % (tinit+measure['t'],measure['s'])

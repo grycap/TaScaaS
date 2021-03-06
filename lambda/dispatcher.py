@@ -1,19 +1,3 @@
-# IM - Infrastructure Manager
-# Copyright (C) 2020-2021 - GRyCAP - Universitat Politecnica de Valencia
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <http://www.gnu.org/licenses/>.
-
 import json
 import os
 import stat
@@ -492,17 +476,25 @@ def lambda_handler(event, context):
                         del item["workersInfo"][index]
                         del item["workersID"][index]
                 
-                if dispatched == 0:
-                    requiredSlots = float(remaining)/2.0+1.0
+                if dispatched == 0 and remaining == 0:
+                    requiredSlots = max(float(availableSlots)*0.8,1.0)
+                elif dispatched == 0 and remaining > 0:
+                    requiredSlots = availableSlots + remaining
                 else:
-                    if dispatchedPerScale < availableSlots:
-                        #There are idle slots, remove it
-                        requiredSlots = max(dispatchedPerScale,1.0)
+                    if remaining  <= availableSlots/10:
+                        if dispatched > availableSlots:
+                            #Reduce the number of slots
+                            requiredSlots = max(float(availableSlots)*0.7,1.0)
+                        else:
+                            #The jobs execution time is largen than scale time 
+                            requiredSlots = availableSlots
                     else:
                         balanceFactor = float(remaining)/float(dispatched)
                         if balanceFactor > 0.10: #Allow a deviation of 10%
                             #Update the number of required slots
                             requiredSlots = max(1.0,float(availableSlots) * (1.0+balanceFactor))
+                        else:
+                            requiredSlots = availableSlots
                 
                 #Calculate total platform required capacity
                 if maxSlots > 0:
